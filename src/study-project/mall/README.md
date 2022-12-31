@@ -1,0 +1,3073 @@
+# 项目环境
+
+## Vagrant部署Centos
+
+Vagrant官网下载即可
+
+> 这里采用中科大的镜像站进行下载
+>
+> 地址如下：
+>
+> [Index of /centos-cloud/centos/7/vagrant/x86_64/images/ (ustc.edu.cn)](https://mirrors.ustc.edu.cn/centos-cloud/centos/7/vagrant/x86_64/images/)
+
+```
+vagrant init centos7 https://mirrors.ustc.edu.cn/centos-cloud/centos/7/vagrant/x86_64/images/CentOS-7.box
+```
+
+
+
+**启动虚拟机**
+
+> 启动完之后就可以关掉CMD窗口了，我们用xshell连接即可
+
+```
+vagrant up
+```
+
+
+
+## 虚拟机的配置
+
+### 网络
+
+> 网卡为桥接，这样我们就不用配置端口转发了
+>
+> virtualbox [虚拟机](https://so.csdn.net/so/search?q=虚拟机&spm=1001.2101.3001.7020)网络配置中对每个网卡都有一个混杂模式的配置，默认为“拒绝”，如此所有进入此接口的报文，如果目的MAC与此接口MAC不相同则全部丢弃。
+>
+> **由于桥接设备报文转发时，进入接口的报文目的MAC与接口MAC完全不相同，故必须将混杂模式设置为“全部允许”**
+
+![image-20220904135647727](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220904135647727.png)
+
+![image-20220725165116489](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220725165116489.png)
+
+**配置完网络重启网络并进行测试**
+
+![image-20220725165149485](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220725165149485.png)
+
+### 登录
+
+vi /etc/ssh/sshd_config 修改 PasswordAuthentication yes
+
+重启服务
+
+
+
+### yum源配置
+
+> `-o`参数将服务器的回应保存成文件，等同于`wget`命令。
+
+```bash
+$ curl -o example.html https://www.example.com
+```
+
+上面命令将`www.example.com`保存成`example.html`。
+
+
+
+`-O`参数将服务器回应保存成文件，并将 URL 的最后部分当作文件名。
+
+```bash
+curl -O https://www.example.com/foo/bar.html
+```
+
+上面命令将服务器回应保存成文件，文件名为`bar.html`。
+
+
+
+**使用新 yum 源**
+
+> 阿里云的这个是最快的，网易有点卡
+>
+> 使用这种方式的前提是网络模式为桥接模式，能直接上网，具体按照前面的进行配置
+
+```
+wget -O /etc/yum.repos.d/local.repo http://mirrors.aliyun.com/repo/Centos-7.repo
+或者curl下载
+curl -o /etc/yum.repos.d/local.repo http://mirrors.aliyun.com/repo/Centos-7.repo
+
+yum clean all && yum makecache
+
+yum install -y epel-release
+
+yum clean all && yum makecache
+```
+
+## Docker环境
+
+### yum安装docker
+
+```
+第一步
+yum install -y yum-utils \
+        device-mapper-persistent-data \
+        lvm2
+第二步使用阿里云镜像
+yum-config-manager --add-repo http://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo && yum makecache fast
+第三步安装
+yum install docker-ce docker-ce-cli containerd.io
+systemctl start docker systemctl enable docker 
+docker run hello-world
+```
+
+![](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220402204821446.png)
+
+### 配置加速器
+
+![image-20220413165211950](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220413165211950.png)
+
+```
+sudo mkdir -p /etc/docker
+
+sudo tee /etc/docker/daemon.json <<-'EOF'
+{
+"registry-mirrors": ["https://3w352wd.mirror.aliyuncs.com"]
+}
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+```
+
+### 安装Mysql
+
+```bash
+docker run -p 3306:3306 --name mysql \
+-v /mydata/mysql/log:/var/log/mysql \
+-v /mydata/mysql/data:/var/lib/mysql \
+-v /mydata/mysql/conf:/etc/mysql \
+-e MYSQL_ROOT_PASSWORD=root  \
+-d mysql:5.7
+```
+
+- -p 3306:3306：将容器的3306端口映射到主机的3306端口
+- -v /mydata/mysql/conf:/etc/mysql：将配置文件夹挂在到主机
+- -v /mydata/mysql/log:/var/log/mysql：将日志文件夹挂载到主机
+- -v /mydata/mysql/data:/var/lib/mysql/：将数据文件夹挂载到主机
+- -e MYSQL_ROOT_PASSWORD=root：初始化root用户的密码
+
+**MySQL 配置**
+
+```bash
+vi /mydata/mysql/conf/my.cnf
+[client]
+default-character-set=utf8
+
+[mysql]
+default-character-set=utf8
+
+[mysqld]
+init_connect='SET collation_connection = utf8_unicode_ci'
+init_connect='SET NAMES utf8'
+character-set-server=utf8
+collation-server=utf8_unicode_ci
+skip-character-set-client-handshake
+skip-name-resolve #跳过域名解析
+
+docker exec -it mysql mysql -uroot -proot
+grant all privileges on *.* to 'root'@'%' identified by 'root' with grant option;
+flush privileges;
+
+退出，设置开启自动启动
+docker update mysql(服务名) --restart=always
+```
+
+#### Mysql本地连接失败
+
+- pc和vm能互相ping通
+- 关闭firewalld，或放开端口
+- 打开ipv4转发
+  - vi /etc/sysctl.conf net.ipv4.ip_forward=1    #添加此行配置
+  - systemctl restart network && systemctl restart docker
+  - sysctl net.ipv4.ip_forward
+  - 如果返回为“net.ipv4.ip_forward = 1”则表示修改成功
+
+
+
+### 安装Redis
+
+```bash
+docker run -p 6379:6379 --name redis -v /mydata/redis/data:/data \
+-v /mydata/redis/conf/redis.conf:/etc/redis/redis.conf \
+-d redis redis-server /etc/redis/redis.conf
+```
+
+### 安装Nginx
+
+```shell
+随便启动一个Nginx，目的是单纯为了复制配置文件
+docker run -p 80:80 --name nginx -d nginx:1.10
+
+docker container cp nginx:/etc/nginx .
+mv nginx/ conf
+mv conf/ /mydata/nginx
+docker rm -f nginx
+
+结构如下：
+[root@localhost mydata]# cd nginx/
+[root@localhost nginx]# ls
+conf
+[root@localhost nginx]# cd conf/
+[root@localhost conf]# ls
+conf.d  fastcgi_params  html  koi-utf  koi-win  logs  mime.types  modules  nginx.conf  scgi_params  uwsgi_params  win-utf
+
+z
+docker run -p 80:80 --name nginx \
+-v /mydata/nginx/html:/usr/share/nginx/html \
+-v /mydata/nginx/logs:/var/log/nginx \
+-v /mydata/nginx/conf:/etc/nginx \
+-d nginx:1.10
+```
+
+
+
+## Git配置
+
+### 配置 Git
+
+> 通过配置git，能让我们提交代码的时候显示我们的在这里设置的名字
+
+```bash
+# 配置用户名
+git config --global user.name "username" //（名字）
+# 配置邮箱
+git config --global user.email "username@email.com" //(注册账号时用的邮箱)
+```
+
+### 配置 Ssh 免密登录
+
+> 这里-C指定的为邮箱地址
+
+```
+ssh-keygen -t rsa -C "mildcaq@163.com"
+```
+
+**查看公钥**
+
+```bash
+cat ~/.ssh/id_rsa.pub
+```
+
+**测试**
+
+```bash
+用 ssh -T git@gitee.com 测试登录
+成功会出现如下：
+Hi 彭于晏! You've successfully authenticated, but GITEE.COM does not provide shell access.
+```
+
+
+
+### Gitee配置
+
+> gitee为代码托管平台，在这里代码可以更灵活的合作开发、代码回滚等等
+
+![image-20220725210747743](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220725210747743.png)
+
+### 从Gitee导入代码到IDEA
+
+![image-20220725221240433](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220725221240433.png)
+
+
+
+## 建立项目基本架构
+
+![image-20220725221433768](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220725221433768.png)
+
+### 提交代码到gitee
+
+![image-20220725221030090](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220725221030090.png)
+
+
+
+### 初始化数据库
+
+> 这里数据库我们采用docker中部署的mysql
+
+**设置每次重启后自动启动**
+
+```bash
+[root@queen ~]# docker update redis --restart=always
+redis
+[root@queen ~]# docker update mysql --restart=always
+mysql
+```
+
+**重启虚拟机看是否重新启动**
+
+```bash
+[root@queen ~]# docker ps
+CONTAINER ID   IMAGE       COMMAND                  CREATED       STATUS              PORTS                                                  NAMES
+d82881d71fba   redis       "docker-entrypoint.s…"   5 hours ago   Up About a minute   0.0.0.0:6379->6379/tcp, :::6379->6379/tcp              redis
+f8bb0bf0b68a   mysql:5.7   "docker-entrypoint.s…"   5 hours ago   Up About a minute   0.0.0.0:3306->3306/tcp, :::3306->3306/tcp, 33060/tcp   mysql
+
+```
+
+## 快速搭建后台管理系统
+
+> 太强了，这一波操作直接颠覆我的认知好吧，我之前做都是用vue-template这个，不得不说有点麻烦
+
+![image-20220725225125303](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220725225125303.png)
+
+### 下载代码
+
+- 通过git clone
+  - 这里通过git clone下载的代码我们可以直接下载桌面，然后分别导入之后直接删除即可
+- 在gitee直接下载
+  - 用IDM下载还是比较快的！
+
+![image-20220725225451061](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220725225451061.png)
+
+
+
+### 导入后端代码
+
+**1.创建基础架构**
+
+![image-20220726200004929](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220726200004929.png)
+
+**2.引入外部模块**
+
+https://gitee.com/renrenio/renren-fast.git
+
+https://gitee.com/renrenio/renren-fast-vue.git
+
+https://gitee.com/renrenio/renren-generator.git
+
+以上分别是：
+
+- 后端代码
+- 前端代码
+- 代码生成器
+
+
+
+git克隆到桌面，拷贝文件夹到项目文件夹，删除桌面文件
+
+![image-20220726200218101](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220726200218101.png)
+
+
+
+**3.导入数据，修改配置文件**
+
+> 这里的数据库都是Docker启动的Mysql
+
+![image-20220725231959015](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220725231959015.png)
+
+**4.修改配置文件**
+
+> 改成 自己的mysql容器地址，还要指定数据库名
+
+```xml
+url: jdbc:mysql://192.168.1.12:3306/mall-admin?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+```
+
+**5.启动测试**
+
+![image-20220726102408806](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220726102408806.png)
+
+#### 导入项目后的pom问题
+
+>   **` <relativePath></relativePath>`这个作用是不依赖本地parent pom,直接从reposity拉取**
+>
+> 不继承父类，相当于用自己的
+
+```xml
+<parent>
+   <groupId>org.springframework.boot</groupId>
+   <artifactId>spring-boot-starter-parent</artifactId>
+   <version>2.6.6</version>
+   <relativePath></relativePath>
+</parent>
+
+在父pom文件，引入新加进来的模块
+    <modules>
+        <module>mall-product</module>
+        <module>mall-coupon</module>
+        <module>mall-member</module>
+        <module>mall-order</module>
+        <module>mall-ware</module>
+        <module>mall-common</module>
+        <module>renren-fast</module>
+    </modules>
+```
+
+#### 插件下载失败
+
+> 其中docker的插件版本选择1.2.2可下载
+
+有以下几种方式调试：
+
+- 设置多maven地址
+- 设置maven自动导入，删除本地这个包让他重新下载
+- 每次更改都要刷新、重启IDEA
+- 删除项目，重新克隆到本地
+
+![image-20220726101740975](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220726101740975.png)
+
+#### 更改配置文件，连接测试
+
+```yml
+url: jdbc:mysql://192.168.1.12:3306/mall-admin?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+username: root
+password: root
+........
+```
+
+启动“renren-admin”，然后访问“http://localhost:8080/renren-fast/”
+
+测试成功如下
+
+![image-20220727204744168](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220727204744168.png)
+
+### 导入前端代码
+
+```
+npm config set registry http://registry.npm.taobao.org/
+npm install #在下载的前端项目根目录下
+npm run dev #启动前端项目
+```
+
+如果上面不行可以采用
+
+```
+npm install -g cnpm --registry=https://registry.npm.taobao.org
+cnpm install node-sass --save
+npm run dev #启动前端项目
+```
+
+安装成功出现如下提示：
+
+```
+DONE  Compiled successfully in 14998ms                 9:25:32
+
+ I  Your application is running here: http://localhost:8001
+```
+
+启动测试：
+
+![image-20220726102441069](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220726102441069.png)
+
+至此，简单的后台管理系统搭建完成...
+
+#### npm install失败
+
+开启v2ray等你懂得的软件，没有的话通过
+
+清理缓存：npm rebuild node-sass
+              	 npm uninstall node-sass
+
+重新下载：npm i node-sass --sass_binary_site=https://npm.taobao.org/mirrors/node-sass/
+
+再次npm install 直到成功
+
+**还是失败？**
+
+删除node_moudle模块删除重新npm install
+
+快速完成
+
+## 生成所有基本CRUD代码
+
+### 代码生成器注意点
+
+#### controller模板
+
+> 自动生成的controller包中代码带有安全框架shiro，这个我们不需要所以直接注释掉
+
+修改自动生成的模板，注释掉全部的
+
+- 注解：@RequiresPermissions
+
+- 包：import org.apache.shiro.authz.annotation.RequiresPermissions;
+
+![image-20220727220907377](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220727220907377.png)
+
+#### 自定义类的返回路径
+
+因为我们把一些通用返回类异常等都放到了mall-common模块,所以mall-common包的定义要根据代码生成器这个包的路径来写;
+
+比如:同一返回类我们要在写在`主路径.common.utils`包下;
+
+不然全部的controller都会报包的位置错误!
+
+> mainpath就是代码生成器模块配置文件指定的
+
+![image-20220728104616468](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220728104616468.png)
+
+
+
+**1、git clone克隆到桌面**
+
+![image-20220727204918870](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220727204918870.png)
+
+**2、修改配置**
+
+> 这里拿product模块做示范
+
+```properties
+mainPath=com.caq
+#\u5305\u540D
+package=com.caq.mall
+moduleName=product
+#\u4F5C\u8005
+author=xiaocai
+#Email
+email=mildcaq@gmail.com
+#\u8868\u524D\u7F00(\u7C7B\u540D\u4E0D\u4F1A\u5305\u542B\u8868\u524D\u7F00)
+tablePrefix=pms_
+```
+
+application.yml
+
+```yml
+spring:
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    #MySQL配置
+    driverClassName: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://192.168.1.12:3306/mall_pms?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai
+    username: root
+    password: root
+```
+
+**3、运行模块**
+
+访问：`http://localhost:80/`
+
+![image-20220727205744304](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220727205744304.png)
+
+**4、新建common模块**
+
+> 因为自动生成的代码，需要有同一返回类、统一异常处理....
+>
+> 这些代码都在renren-fast模块，我们直接拷贝到mall-common模块即可
+
+各模块所需代码如下：
+
+![image-20220727213039350](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220727213039350.png)
+
+依赖如下：
+
+```xml
+父pom中引入新家的common模块
+<modules>
+    <module>mall-product</module>
+    <module>mall-coupon</module>
+    <module>mall-member</module>
+    <module>mall-order</module>
+    <module>mall-ware</module>
+    <module>renren-fast</module>
+    <module>renren-generator</module>
+    <module>mall-common</module>
+</modules>
+
+common引入如下依赖
+<dependencies>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>1.18.22</version>
+        </dependency>
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-boot-starter</artifactId>
+            <version>3.4.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpcore</artifactId>
+            <version>4.4.13</version>
+        </dependency>
+        <dependency>
+            <groupId>commons-lang</groupId>
+            <artifactId>commons-lang</artifactId>
+            <version>2.6</version>
+        </dependency>
+        <dependency>
+            <groupId>javax.servlet</groupId>
+            <artifactId>servlet-api</artifactId>
+            <version>2.5</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>mysql</groupId>
+            <artifactId>mysql-connector-java</artifactId>
+            <version>8.0.17</version>
+        </dependency>
+    </dependencies>
+```
+
+**5、拷贝代码注意点**
+
+打开模块所在文件夹进行拷贝
+
+![image-20220728104041823](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220728104041823.png)
+
+### product模块
+
+**1、引入common模块**
+
+生成的代码都要引入common模块,因为自定义的一些类都指定在了mall-common模块
+
+**2、配置文件**
+
+application.yml
+
+```yml
+spring:
+  datasource:
+    username: root
+    password: root
+    url: jdbc:mysql://192.168.1.12:3306/mall_pms?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  global-config:
+    db-config:
+      id-type: auto
+  mapper-locations: classpath:/mapper/**/*.xml
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+```
+
+application.properties
+
+用来配置端口和服务名称
+
+```properties
+# 应用名称
+spring.application.name=mall-product
+# 应用服务 WEB 访问端口
+server.port=9999
+```
+
+**3、启动类增加mappersan注解**
+
+> 这里强调下：
+>
+> 代码自动生成器生成的代码中，Mapper文件都加了@Mapper注解，所以我们不用加@MapperScan
+>
+> 如果你自己写的话，MapperScan是个更好的选择
+
+```
+@MapperScan("com.caq.mall.product.dao")
+```
+
+**4、测试**
+
+```java
+package com.caq.mall;
+
+import com.caq.mall.product.entity.BrandEntity;
+import com.caq.mall.product.service.BrandService;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+
+@SpringBootTest
+class MallProductApplicationTests {
+
+    @Autowired
+    private BrandService brandService;
+
+    @Test
+    void contextLoads() {
+        BrandEntity brandEntity = new BrandEntity();
+        brandEntity.setName("苹果");
+        brandService.save(brandEntity);
+    }
+
+}
+
+JDBC Connection [HikariProxyConnection@1371953731 wrapping com.mysql.cj.jdbc.ConnectionImpl@740dcae3] will not be managed by Spring
+==>  Preparing: INSERT INTO pms_brand ( name ) VALUES ( ? )
+==> Parameters: 苹果(String)
+<==    Updates: 1
+```
+
+**5、上传代码到github**
+
+> 上传失败可搜索我的文章，今天刚更新的
+>
+> `Java初学者必看`，这篇文章
+
+![image-20220727230049663](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220727230049663.png)
+
+### coupon模块
+
+**1、修改代码生成器配置文件**
+
+```properties
+mainPath=com.caq
+#\u5305\u540D
+package=com.caq.mall
+moduleName=coupon
+#\u4F5C\u8005
+author=xiaocai
+#Email
+email=mildcaq@gmail.com
+#\u8868\u524D\u7F00(\u7C7B\u540D\u4E0D\u4F1A\u5305\u542B\u8868\u524D\u7F00)
+tablePrefix=sms_
+```
+
+yml文件
+
+```yml
+server:
+  port: 80
+
+# mysql
+spring:
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    #MySQL配置
+    driverClassName: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://192.168.1.12:3306/mall_sms?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai
+    username: root
+    password: root
+```
+
+**2、重启服务，重新生成代码文件**
+
+![image-20220728102255561](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220728102255561.png)
+
+**3、拷贝代码，建立coupon配置文件**
+
+> 因为我们是通过SpringInit初始化的模块，所以每个模块都有自带的配置文件applicaiton.properties
+>
+> 改端口的话我们可以修改applicaiton.properties文件
+
+```yml
+spring:
+  datasource:
+    username: root
+    password: root
+    url: jdbc:mysql://192.168.1.12:3306/mall_sms?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  mapper-locations: classpath:/mapper/**/*.xml
+  global-config:
+    db-config:
+      id-type: auto
+```
+
+**4、运行，测试**
+
+http://localhost:7000/coupon/coupon/list 
+
+```
+{"msg":"success","code":0,"page":{"totalCount":0,"pageSize":10,"totalPage":0,"currPage":1,"list":[]}}
+```
+
+### member模块
+
+重复上述操作，改代码生成器配置文件，运行生成代码，拷贝代码到模块
+
+拷贝后的代码，建立配置文件，改端口，运行
+
+测试,没问题即可
+
+![image-20220728110033046](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220728110033046.png)
+
+### order模块
+
+重复上述操作，改代码生成器配置文件（模块名，数据库名），运行生成代码，拷贝代码到模块
+
+重复上述操作，拷贝后的代码，建立配置文件，改端口，运行
+
+
+
+### ware模块
+
+重复上述操作，改代码生成器配置文件（模块名，数据库名），运行生成代码，拷贝代码到模块
+
+重复上述操作，拷贝后的代码，建立配置文件，改端口，运行
+
+# SpringCloud
+
+## 版本选择
+
+https://github.com/alibaba/spring-cloud-alibaba/wiki/%E7%89%88%E6%9C%AC%E8%AF%B4%E6%98%8E
+
+![image-20220729165125383](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729165125383.png)
+
+![image-20220728163730187](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220728163730187.png)
+
+这里要注意的是其他模块也要改springboot的版本，都为2.3.2.rekease
+
+
+
+## Nacos
+
+**1、启动Nacos**
+
+![image-20220728230611716](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220728230611716.png)
+
+**2、将微服务注册到 nacos 中**
+
+mall-ommon模块进行引入
+
+```sql
+<dependency>
+    <groupId>com.alibaba.cloud</groupId>
+    <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+</dependency>
+```
+
+这样所有的引入common模块的其他模块就都有这个服务发现了，接下来还需要两步
+
+- 在需要将微服务加到注册中心的启动类上加注解@EnableDiscoveryClient
+
+- 改模块配置文件
+
+  - ```yml
+    spring:
+        cloud:
+            nacos:
+              discovery:
+                server-addr: localhost:8848 #nacos地址
+    ```
+
+**3、测试**
+
+![image-20220728232800873](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220728232800873.png)
+
+![image-20220728232808671](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220728232808671.png)
+
+
+
+## Feign
+
+> **它的目的就是让远程调用更加简单**，Feign提供了HTTP请求的模板。通过写**接口和插入注解**，就可以定义好HTTP请求的参数、格式、地址等信息
+
+例如：想要获取当前会员领取到的所有优惠券。先去注册中心找优惠券服务， 注册中心调一台优惠券服务器给会员，会员服务器发送请求给这台优惠券服务器，然后对方响应。
+
+下面我们看它是怎么用的：
+
+**1、引入open-feign**
+
+前期建模块的时候我们已经引入过了
+
+**2、在调用方的主函数头上标注注解打开远程调用，并指定远程调用接口的位置**
+
+```java
+@SpringBootApplication
+@EnableDiscoveryClient //标注启动服务发现
+@EnableFeignClients(basePackages = "com.caq.mall.member.feign")
+public class MallMemberApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(MallMemberApplication.class, args);
+    }
+}
+```
+
+**3、编写远程调用接口**
+
+1. 通过@FeignClient("mall-coupon")指定远程调用哪个微服务
+2. 方法为要调用微服务功能的的签名部分（**路径要写全**）
+
+那么当我们调用这个接口的方法时，他就会去注册中心中找远程服务mall-coupon所在位置，最后调用/coupon/coupon/member/list这个请求对应的方法
+
+```java
+package com.caq.mall.member.feign;
+
+import com.caq.common.utils.R;
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.RequestMapping;
+
+@FeignClient("mall-coupon")
+public interface CouponFeignService {
+
+    @RequestMapping("/coupon/coupon/member/list")
+    public R memberCoupons();
+
+}
+```
+
+**4、测试**
+
+被调用方：为优惠卷微服务新添加一个功能，这个功能就是访问这个请求时会返回优惠卷的信息以List的形式
+
+![image-20220729000325703](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729000325703.png)
+
+调用方：注入服务，写一个请求来获取用户信息和优惠卷信息
+
+![image-20220729000448573](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729000448573.png)
+
+结果如下：
+
+![image-20220728235357961](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220728235357961.png)
+
+## 配置中心
+
+配置中心就是把配置文件写在Nacos中，当你修改配置中心内容时项目**不需要重启项目**即可根据配置文件实现**实时更新**
+
+官方文档演示：
+
+https://github.com/alibaba/spring-cloud-alibaba/blob/2.2.x/spring-cloud-alibaba-examples/nacos-example/nacos-config-example/readme-zh.md
+
+过程如下：
+
+![image-20220729074959340](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729074959340.png)
+
+**1、引入依赖**
+
+common模块
+
+```xml
+<dependency>
+    <groupId>com.alibaba.cloud</groupId>
+    <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+</dependency>
+```
+
+**2、创建bootstrap.properties**
+
+所有配置文件中优先级最高
+
+服务启动后会先读取这个文件，读取后就会去从nacos配置中心加载`mall-coupon.properties`文件
+
+```properties
+spring.application.name=mall-coupon
+spring.cloud.nacos.config.server-addr=127.0.0.1:8848
+```
+
+**3、配置中心定义新配置文件**
+
+其中，DataID必须为微服务名.yml(properties)
+
+配置的内容什么都可以
+
+![image-20220729084603849](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729084603849.png)
+
+**4、测试**
+
+> 这里显示Json数据用了JSONVUE插件，可在谷歌商店直接下载
+
+![](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220730175100628.png)
+
+- 在Controller加上`@RefreshScope`来动态获取配置数据
+
+![image-20220729084827766](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729084827766.png)
+
+![image-20220729084910918](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729084910918.png)
+
+**配置中心修改配置再刷新**
+
+![image-20220729084943351](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729084943351.png)
+
+### NameSpace
+
+命名空间就是用来隔离资源的
+
+什么情况下会用到呢？
+
+你生产环境想用这一套配置，开发环境想用另一套配置。那么就可以把配置文件放到不同的命名空间中
+
+**1、新建命名空间**
+
+![image-20220729090043943](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729090043943.png)
+
+配置文件
+
+![image-20220729090207468](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729090207468.png)
+
+**2、bootstrap.properties指定命名空间**
+
+微服务启动的时候会先去bootstrap.properties加载，然后根据配置去Nacos配置中心找到文件
+
+```properties
+spring.cloud.nacos.config.name=mall-coupon
+spring.cloud.nacos.config.server-addr=127.0.0.1:8848
+spring.cloud.nacos.config.namespace=dag5139-g77f-s220-bf21-b48c3e117250
+spring.cloud.nacos.config.extension-configs[0].data-id=mall-coupon.yml
+spring.cloud.nacos.config.extension-configs[0].group=DEFAULT_GROUP
+spring.cloud.nacos.config.extension-configs[0].refresh=true
+```
+
+yml格式如下：
+
+```yml
+spring:
+  application:
+    name: mall-coupon
+  cloud:
+    nacos:
+      config:
+        server-addr: 127.0.0.1:8848:8848
+        namespace: dag5139-g77f-s220-bf21-b48c3e117250
+        file-extension: yaml
+        extension-configs:
+          - data-id: mall-coupon.yml
+            group: DEFAULT_GROUP
+            refresh: true
+```
+
+![image-20220729090431390](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729090431390.png)
+
+**3、测试**
+
+这个配置就是我prop命名空间定义的配置文件
+
+![image-20220729090643591](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729090643591.png)
+
+### Group
+
+一般Group和Namespace配合使用
+
+解决方案为：每个微服务创建自己的命名空间，使用配置分组区分环境
+
+分组在创建配置文件的时候直接进行创建即可
+
+**1、创建微服务NameSpace并创建分组**
+
+![image-20220729094413879](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729094413879.png)
+
+**2、bootstrap.properties指定分组**
+
+```properties
+spring.application.name=mall-coupon
+spring.cloud.nacos.config.server-addr=127.0.0.1:8848
+spring.cloud.nacos.config.namespace=8c4aa2e1-412b-4992-90d7-b74cf3abbef1
+spring.cloud.nacos.config.group=11
+```
+
+**3、测试**
+
+![image-20220729093831023](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729093831023.png)
+
+### 加载多配置集
+
+配置相关的如果都放到一个配置文件中会很乱难维护
+
+所以把配置文件进行拆分，spring相关的放spring配置文件，mybatis相关的放mybatis配置文件.......
+
+Nacos也可以做到
+
+**1、抽取出多个配置文件**
+
+![image-20220729095020493](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729095020493.png)
+
+其他配置文件同理
+
+![image-20220729095049304](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729095049304.png)
+
+**2、bootstrap.properties指定加载多配置集**
+
+> 这里的spring.cloud.nacos.config.extension-configs[0].data-id意思就是说，集合里的元素是一个个数组，数组里有是一个个对象所以第一个元素可以赋值多次
+>
+> 下面配置也是同理
+
+```properties
+# 配置中心加载配置文件
+spring.application.name=mall-coupon
+spring.cloud.nacos.config.server-addr=127.0.0.1:8848
+spring.cloud.nacos.config.namespace=8c4aa2e1-412b-4992-90d7-b74cf3abbef1
+spring.cloud.nacos.config.group=11
+
+# 加载多配置集
+spring.cloud.nacos.config.extension-configs[0].data-id=datasource.yml
+spring.cloud.nacos.config.extension-configs[0].group=11
+spring.cloud.nacos.config.extension-configs[0].refresh=true
+
+spring.cloud.nacos.config.extension-configs[1].data-id=mybatis.yml
+spring.cloud.nacos.config.extension-configs[1].group=11
+spring.cloud.nacos.config.extension-configs[1].refresh=true
+
+spring.cloud.nacos.config.extension-configs[2].data-id=other.yml
+spring.cloud.nacos.config.extension-configs[2].group=11
+spring.cloud.nacos.config.extension-configs[2].refresh=true
+```
+
+**3、测试**
+
+我们注释掉所有本地的yml配置并重启
+
+![image-20220729095923691](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729095923691.png)
+
+![image-20220729102516969](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729102516969.png)
+
+### 总结
+
+微服务任何配置信息，任何配置文件都可以放在配置中心中
+
+线上环境的时候我们可以把所有配置都放在配置中心，微服务中只保留一个`bootstrap.properties`文件说明`加载配置中心哪些配置文件`即可
+
+## GateWay网关
+
+GateWay网关能对所有请求进行路由转发、权限校验、限流控制等
+
+**一、建module引入pom**
+
+还是通过SpringInit工程来创建模块，直接选中SpringCloudGateway组件
+
+![image-20220730083029280](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220730083029280.png)
+
+**二、开启服务发现**
+
+> 这里要设置不自动装配数据源
+
+```java
+@SpringBootApplication(exclude = {DataSourceAutoConfiguration.class})
+@EnableDiscoveryClient //开启注册服务发现
+public class AchangmallGatewayApplication {
+	public static void main(String[] args) {
+		SpringApplication.run(AchangmallGatewayApplication.class, args);
+	}
+}
+```
+
+**三、服发现和配置中心**
+
+applicaion.properties指定nacos地址
+
+```properties
+# 应用名称
+spring.application.name=mall-gateway
+server.port=88
+#服务发现
+spring.cloud.nacos.discovery.server-addr=127.0.0.1:8848
+```
+
+bootstrap.properties 填写配置中心地址
+
+这里写了namespace，需要我们先提前在nacos创建好
+
+```properties
+spring.application.name=mall-gateway
+spring.cloud.nacos.config.server-addr=127.0.0.1:8848
+spring.cloud.nacos.config.namespace=f1212912-c9f6-4323-b9f5-1a7d8d92c5b4
+```
+
+四、nacos创建配置文件mall-gateway.yml
+
+```yml
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: baidu_route
+          uri: http://www.baidu.com
+          predicates:
+            - Query=url,baidu
+
+        - id: test_route
+          uri: http://www.qq.com
+          predicates:
+            - Query=url,qq
+```
+
+![image-20220729124135801](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729124135801.png)
+
+# 三级分类
+
+**什么是三级分类？**
+
+![image-20220729172400791](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729172400791.png)
+
+**想实现如下效果：**
+
+![image-20220807215344459](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220807215344459.png)
+
+## 后端思路
+
+### 提供接口
+
+> 写接口就是写mapper、service、controller的过程
+>
+> 获取所有分类以及子分类，并返回json树形结构
+
+**一、service**
+
+```java
+service
+List<CategoryEntity> listWithTree();
+
+
+实现类
+@Override
+    public List<CategoryEntity> listWithTree() {
+
+        List<CategoryEntity> categoryEntityList = baseMapper.selectList(null);
+
+    	//查出所有的一级分类
+        List<CategoryEntity> level1Menus = categoryEntityList.stream().filter(categoryEntity ->
+                categoryEntity.getParentCid() == 0
+        ).map(menu -> {
+            //对每个一级分类进行设置，如一级分类下的多级子分类
+            menu.setChildren(getChildrens(menu, categoryEntityList));
+            return menu;
+            //设置之后进行排序
+        }).sorted((menu1, menu2) -> {
+            return menu1.getSort() - menu2.getSort();
+        }).collect(Collectors.toList());
+        return level1Menus;
+    }
+
+    private List<CategoryEntity> getChildrens(CategoryEntity root, List<CategoryEntity> allList) {
+        
+        List<CategoryEntity> collect = allList.stream().filter(categoryEntity -> {
+            //获得一级分类下的二级分类
+            return categoryEntity.getParentCid() == root.getCatId();
+        }).map(categoryEntity -> {
+            //对每个二级分类进行设置，递归获得二级分类下的三级分类，三级分类走到走到这里也会获得属于它的四级分类
+            categoryEntity.setChildren(getChildrens(categoryEntity, allList));
+            return categoryEntity;
+        }).sorted((menu1, menu2) -> {
+            
+            return (menu1.getSort() == null ? 0 : menu1.getSort()) - (menu2.getSort() == null ? 0 : menu2.getSort());
+        }).collect(Collectors.toList());
+        return collect;
+    }
+```
+
+这里的查询用到了Stream流的特性，流程如图
+
+> 这里查询的关键点是用到了Java1.8中的新特性Stream流的特性，新特性能够将资源转化为流的形式进行操控，用来处理集合数组十分方便！
+>
+> 其中.filter()方法是对流进行过滤一般写筛选条件，被筛选过的流在继续进行其他操作
+> 比如.map()这个方法是对被筛选过后的流进行映射，一般是对属性进行赋值。
+>
+> .sorted()方法是对流进行一个简单的排序格式固定，返回的结果如果是大于0就是升序排列，大于0就是降序排列！
+>
+> .collection()方法是对流进行一个转换的操作，可以将流在转化为集合的形式！
+
+![image-20220730174826563](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220730174826563.png)
+
+
+
+**二、controller**
+
+```java
+@RequestMapping("/list/tree")
+public R list(){
+    List<CategoryEntity> categoryEntityList = categoryService.listWithTree();
+    return R.ok().put("data", categoryEntityList);
+}
+```
+
+
+
+**三、测试**
+
+![image-20220729193937106](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220729193937106.png)
+
+## 前端思路
+
+### 关闭es6代码检查
+
+**不关闭的话，vscode控制台会一直报错**
+
+这个谷粒学院项目有讲到过！
+
+![image-20220731204741821](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220731204741821.png)
+
+### 为商品系统新增侧边导航
+
+![image-20220731105506586](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220731105506586.png)
+
+### renren-fast-vue路由规范
+
+![image-20220731105738477](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220731105738477.png)
+
+可以看出，`不同的功能在不通的文件夹下`，`不同的页面写不同的vue页面`
+
+那么我们写product模块，所以建product文件，然后子菜单就写对应的vue文件即可
+
+### 前端代码
+
+两个注意点：拖拽菜单保存的时候，在后端新定义了一个接口如下：
+
+```java
+@RequestMapping("/update/sort")
+public R updateSort(@RequestBody CategoryEntity[] category){
+    categoryService.updateBatchById(Arrays.asList(category));
+    return R.ok();
+}
+```
+
+完整前端代码
+
+```vue
+<template>
+  <div>
+    <el-switch v-model="draggable" active-text="开启拖拽" inactive-text="关闭拖拽"></el-switch>
+    <el-button v-if="draggable" @click="batchSave">批量保存</el-button>
+    <el-button type="danger" @click="batchDelete">批量删除</el-button>
+    <el-tree
+      :data="menus"
+      :props="defaultProps"
+      :expand-on-click-node="false"
+      show-checkbox
+      node-key="catId"
+      :default-expanded-keys="expandedKey"
+      :draggable="draggable"
+      :allow-drop="allowDrop"
+      @node-drop="handleDrop"
+      ref="menuTree"
+    >
+      <span class="custom-tree-node" slot-scope="{ node, data }">
+        <span>{{ node.label }}</span>
+        <span>
+          <el-button
+            v-if="node.level <=2"
+            type="text"
+            size="mini"
+            @click="() => append(data)"
+          >Append</el-button>
+          <el-button type="text" size="mini" @click="edit(data)">edit</el-button>
+          <el-button
+            v-if="node.childNodes.length==0"
+            type="text"
+            size="mini"
+            @click="() => remove(node, data)"
+          >Delete</el-button>
+        </span>
+      </span>
+    </el-tree>
+
+    <el-dialog
+      :title="title"
+      :visible.sync="dialogVisible"
+      width="30%"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="category">
+        <el-form-item label="分类名称">
+          <el-input v-model="category.name" autocomplete="off"></el-input>
+        </el-form-item>
+        <el-form-item label="图标">
+          <el-input v-model="category.icon" autocomplete="off"></el-input>
+        </el-form-item>
+        <el-form-item label="计量单位">
+          <el-input v-model="category.productUnit" autocomplete="off"></el-input>
+        </el-form-item>
+      </el-form>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="dialogVisible = false">取 消</el-button>
+        <el-button type="primary" @click="submitData">确 定</el-button>
+      </span>
+    </el-dialog>
+  </div>
+</template>
+
+<script>
+//这里可以导入其他文件（比如：组件，工具js，第三方插件js，json文件，图片文件等等）
+//例如：import 《组件名称》 from '《组件路径》';
+
+export default {
+  //import引入的组件需要注入到对象中才能使用
+  components: {},
+  props: {},
+  data() {
+    return {
+      pCid: [],
+      draggable: false,
+      updateNodes: [],
+      maxLevel: 0,
+      title: "",
+      dialogType: "", //edit,add
+      category: {
+        name: "",
+        parentCid: 0,
+        catLevel: 0,
+        showStatus: 1,
+        sort: 0,
+        productUnit: "",
+        icon: "",
+        catId: null
+      },
+      dialogVisible: false,
+      menus: [],
+      expandedKey: [],
+      defaultProps: {
+        children: "children",
+        label: "name"
+      }
+    };
+  },
+
+  //计算属性 类似于data概念
+  computed: {},
+  //监控data中的数据变化
+  watch: {},
+  //方法集合
+  methods: {
+    getMenus() {
+      this.$http({
+        url: this.$http.adornUrl("/product/category/list/tree"),
+        method: "get"
+      }).then(({data}) => {
+        console.log("成功获取到菜单数据...", data.data);
+        this.menus = data.data;
+      });
+    },
+    batchDelete() {
+      let catIds = [];
+      let checkedNodes = this.$refs.menuTree.getCheckedNodes();
+      console.log("被选中的元素", checkedNodes);
+      for (let i = 0; i < checkedNodes.length; i++) {
+        catIds.push(checkedNodes[i].catId);
+      }
+      this.$confirm(`是否批量删除【${catIds}】菜单?`, "提示", {
+        confirmButtonText: "确定",
+        cancelButtonText: "取消",
+        type: "warning"
+      })
+        .then(() => {
+          this.$http({
+            url: this.$http.adornUrl("/product/category/delete"),
+            method: "post",
+            data: this.$http.adornData(catIds, false)
+          }).then(({data}) => {
+            this.$message({
+              message: "菜单批量删除成功",
+              type: "success"
+            });
+            this.getMenus();
+          });
+        })
+        .catch(() => {
+        });
+    },
+    batchSave() {
+      this.$http({
+        url: this.$http.adornUrl("/product/category/update/sort"),
+        method: "post",
+        data: this.$http.adornData(this.updateNodes, false)
+      }).then(({data}) => {
+        this.$message({
+          message: "菜单顺序等修改成功",
+          type: "success"
+        });
+        //刷新出新的菜单
+        this.getMenus();
+        //设置需要默认展开的菜单
+        this.expandedKey = this.pCid;
+        this.updateNodes = [];
+        this.maxLevel = 0;
+        // this.pCid = 0;
+      });
+    },
+    handleDrop(draggingNode, dropNode, dropType, ev) {
+      console.log("handleDrop: ", draggingNode, dropNode, dropType);
+      //1、当前节点最新的父节点id
+      let pCid = 0;
+      let siblings = null;
+      if (dropType == "before" || dropType == "after") {
+        pCid =
+          dropNode.parent.data.catId == undefined
+            ? 0
+            : dropNode.parent.data.catId;
+        siblings = dropNode.parent.childNodes;
+      } else {
+        pCid = dropNode.data.catId;
+        siblings = dropNode.childNodes;
+      }
+      this.pCid.push(pCid);
+
+      //2、当前拖拽节点的最新顺序，
+      for (let i = 0; i < siblings.length; i++) {
+        if (siblings[i].data.catId == draggingNode.data.catId) {
+          //如果遍历的是当前正在拖拽的节点
+          let catLevel = draggingNode.level;
+          if (siblings[i].level != draggingNode.level) {
+            //当前节点的层级发生变化
+            catLevel = siblings[i].level;
+            //修改他子节点的层级
+            this.updateChildNodeLevel(siblings[i]);
+          }
+          this.updateNodes.push({
+            catId: siblings[i].data.catId,
+            sort: i,
+            parentCid: pCid,
+            catLevel: catLevel
+          });
+        } else {
+          this.updateNodes.push({catId: siblings[i].data.catId, sort: i});
+        }
+      }
+
+      //3、当前拖拽节点的最新层级
+      console.log("updateNodes", this.updateNodes);
+    },
+    updateChildNodeLevel(node) {
+      if (node.childNodes.length > 0) {
+        for (let i = 0; i < node.childNodes.length; i++) {
+          var cNode = node.childNodes[i].data;
+          this.updateNodes.push({
+            catId: cNode.catId,
+            catLevel: node.childNodes[i].level
+          });
+          this.updateChildNodeLevel(node.childNodes[i]);
+        }
+      }
+    },
+    allowDrop(draggingNode, dropNode, type) {
+      //1、被拖动的当前节点以及所在的父节点总层数不能大于3
+
+      //1）、被拖动的当前节点总层数
+      console.log("allowDrop:", draggingNode, dropNode, type);
+      //
+      this.countNodeLevel(draggingNode);
+      //当前正在拖动的节点+父节点所在的深度不大于3即可
+      let deep = Math.abs(this.maxLevel - draggingNode.level) + 1;
+      console.log("深度：", deep);
+
+      //   this.maxLevel
+      if (type == "inner") {
+        // console.log(
+        //   `this.maxLevel：${this.maxLevel}；draggingNode.data.catLevel：${draggingNode.data.catLevel}；dropNode.level：${dropNode.level}`
+        // );
+        return deep + dropNode.level <= 3;
+      } else {
+        return deep + dropNode.parent.level <= 3;
+      }
+    },
+    countNodeLevel(node) {
+      //找到所有子节点，求出最大深度
+      if (node.childNodes != null && node.childNodes.length > 0) {
+        for (let i = 0; i < node.childNodes.length; i++) {
+          if (node.childNodes[i].level > this.maxLevel) {
+            this.maxLevel = node.childNodes[i].level;
+          }
+          this.countNodeLevel(node.childNodes[i]);
+        }
+      }
+    },
+    edit(data) {
+      console.log("要修改的数据", data);
+      this.dialogType = "edit";
+      this.title = "修改分类";
+      this.dialogVisible = true;
+
+      //发送请求获取当前节点最新的数据
+      this.$http({
+        url: this.$http.adornUrl(`/product/category/info/${data.catId}`),
+        method: "get"
+      }).then(({data}) => {
+        //请求成功
+        console.log("要回显的数据", data);
+        this.category.name = data.data.name;
+        this.category.catId = data.data.catId;
+        this.category.icon = data.data.icon;
+        this.category.productUnit = data.data.productUnit;
+        this.category.parentCid = data.data.parentCid;
+        this.category.catLevel = data.data.catLevel;
+        this.category.sort = data.data.sort;
+        this.category.showStatus = data.data.showStatus;
+        /**
+         *         parentCid: 0,
+         catLevel: 0,
+         showStatus: 1,
+         sort: 0,
+         */
+      });
+    },
+    append(data) {
+      console.log("append", data);
+      this.dialogType = "add";
+      this.title = "添加分类";
+      this.dialogVisible = true;
+      this.category.parentCid = data.catId;
+      this.category.catLevel = data.catLevel * 1 + 1;
+      this.category.catId = null;
+      this.category.name = "";
+      this.category.icon = "";
+      this.category.productUnit = "";
+      this.category.sort = 0;
+      this.category.showStatus = 1;
+    },
+
+    submitData() {
+      if (this.dialogType == "add") {
+        this.addCategory();
+      }
+      if (this.dialogType == "edit") {
+        this.editCategory();
+      }
+    },
+    //修改三级分类数据
+    editCategory() {
+      var {catId, name, icon, productUnit} = this.category;
+      this.$http({
+        url: this.$http.adornUrl("/product/category/update"),
+        method: "post",
+        data: this.$http.adornData({catId, name, icon, productUnit}, false)
+      }).then(({data}) => {
+        this.$message({
+          message: "菜单修改成功",
+          type: "success"
+        });
+        //关闭对话框
+        this.dialogVisible = false;
+        //刷新出新的菜单
+        this.getMenus();
+        //设置需要默认展开的菜单
+        this.expandedKey = [this.category.parentCid];
+      });
+    },
+    //添加三级分类
+    addCategory() {
+      console.log("提交的三级分类数据", this.category);
+      this.$http({
+        url: this.$http.adornUrl("/product/category/save"),
+        method: "post",
+        data: this.$http.adornData(this.category, false)
+      }).then(({data}) => {
+        this.$message({
+          message: "菜单保存成功",
+          type: "success"
+        });
+        //关闭对话框
+        this.dialogVisible = false;
+        //刷新出新的菜单
+        this.getMenus();
+        //设置需要默认展开的菜单
+        this.expandedKey = [this.category.parentCid];
+      });
+    },
+
+    remove(node, data) {
+      var ids = [data.catId];
+      this.$confirm(`是否删除【${data.name}】菜单?`, "提示", {
+        confirmButtonText: "确定",
+        cancelButtonText: "取消",
+        type: "warning"
+      })
+        .then(() => {
+          this.$http({
+            url: this.$http.adornUrl("/product/category/delete"),
+            method: "post",
+            data: this.$http.adornData(ids, false)
+          }).then(({data}) => {
+            this.$message({
+              message: "菜单删除成功",
+              type: "success"
+            });
+            //刷新出新的菜单
+            this.getMenus();
+            //设置需要默认展开的菜单
+            this.expandedKey = [node.parent.data.catId];
+          });
+        })
+        .catch(() => {
+        });
+
+      console.log("remove", node, data);
+    }
+  },
+  //生命周期 - 创建完成（可以访问当前this实例）
+  created() {
+    this.getMenus();
+  },
+  //生命周期 - 挂载完成（可以访问DOM元素）
+  mounted() {
+  },
+  beforeCreate() {
+  }, //生命周期 - 创建之前
+  beforeMount() {
+  }, //生命周期 - 挂载之前
+  beforeUpdate() {
+  }, //生命周期 - 更新之前
+  updated() {
+  }, //生命周期 - 更新之后
+  beforeDestroy() {
+  }, //生命周期 - 销毁之前
+  destroyed() {
+  }, //生命周期 - 销毁完成
+  activated() {
+  } //如果页面有keep-alive缓存功能，这个函数会触发
+};
+</script>
+<style scoped>
+</style>
+```
+
+## GateWay配置
+
+### GateWay回顾
+
+**三大核心概念**
+
+1. Route(路由) - 路由是构建网关的基本模块,它由ID,目标URI,一系列的断言和过滤器组成,如断言为true则匹配该路由；
+2. Predicate(断言) - 开发人员可以匹配HTTP请求中的所有内容(例如请求头或请求参数),如果请求与断言相匹配则进行路由；
+3. Filter(过滤) - 指的是Spring框架中GatewayFilter的实例,使用过滤器,可以在请求被路由前或者之后对请求进行修改。
+
+predicate就是我们的匹配条件；而fliter，就可以理解为一个无所不能的拦截器。有了这两个元素，再加上目标uri，就可以实现一个具体的路由了
+
+**工作流程**
+
+客户端向网关发送请求。如果`GateWay Handler Mapping`确定请求与路由匹配（这个时候就用到predicate），则将这个请求发送给`Gateway web handler`进行处理。如图所示Gateway web handler处理请求会经过一些`filter（过滤器）`过滤器之间用虚线分开是因为过滤器可能会在发送代理请求之前(“pre”)或之后(“post"）执行业务逻辑。
+
+`核心的逻辑：路由转发 + 执行过滤器链。`
+
+
+
+![image-20220731114052109](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220731114052109.png)
+
+
+
+### 跨域问题
+
+跨域：指的是浏览器不能执行其他网站的脚本。它是由浏览器的同源策略造成的，是浏览器对javascript施加的安全限制。
+
+例如：a页面想获取b页面资源，如果a、b页面的协议、域名、端口、子域名不同，所进行的访问行动都是跨域的，而浏览器为了安全问题一般都限制了跨域访问，也就是不允许跨域请求资源。注意：跨域限制访问，其实是**浏览器的限制**。理解这一点很重要！！！
+
+同源策略：是指协议，域名，端口都要相同，其中有一个不同都会产生跨域
+
+**如何解决跨域问题？**
+
+由之前的介绍我们已经知道错误的原因，既然跨域会产生问题，那么我们就不跨域不就完了嘛！！！
+
+1.注解@CrossOrigin，在后端接口加上@CrossOrigin即可解决跨域问题
+
+2.使用网关解决，配置跨域配置类进行设置
+
+### 前端配置统一的请求地址
+
+ window.SITE_CONFIG['baseUrl'] = 'http://localhost:88/api';
+
+**后端的网关地址是多少就填多**少，这样所有的请求都会发到`http://localhost:88/api`这个uri
+
+![image-20220731110417031](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220731110417031.png)
+
+### 将微服务接入nacos
+
+这里通过引入mall-common模块让其他模块启程它的依赖
+
+> 这里renren-fast版本要改成和你Springboot版本一样，如下：
+>
+> 1. springboot版本和sprincloud有版本对应，mall-common模块引入的cloud版本都是对应好的
+> 2. 包的冲突
+>
+> 因为renren-fast本来用的是2.6.6，它和低版本还有个点不同就是配置跨域的配置文件时2.6.6用的是`.allowedOriginPatterns`
+>
+> 而2.4版本以下的用的是`.allowedOrigins`，所以进行替换即可将**.allowedOriginPatterns替换为.allowedOrigins**
+>
+> 如果还有冲突，就用maven helper排查即可
+>
+> `https://blog.csdn.net/kingwinstar/article/details/106916140?spm=1001.2014.3001.5506`
+
+![image-20220731111240299](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220731111240299.png)
+
+那么将微服务引入nacos注册中心只要三步
+
+1. 引入依赖（mall-common）
+2. 添加注解（启动类添加@EnableDiscoveryClient）
+3. 配置文件（指定nacos注册中心地址和微服务名称）
+
+renren-fast的dev配置文件加上如下内容
+
+```yml
+spring:
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+  application:
+    name: renren-fast
+```
+
+网关的properties文件加上如下内容
+
+```properties
+# 应用名称
+spring.application.name=mall-gateway
+server.port=88
+#服务发现
+spring.cloud.nacos.discovery.server-addr=127.0.0.1:8848
+```
+
+注册成功如下
+
+![image-20220731171048839](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220731171048839.png)
+
+### 设置路由
+
+> Spring Cloud Gateway 路径重写正则表达式的理解：https://blog.csdn.net/weixin_43199379/article/details/107768203
+
+这里我在gateway中配置了将nacos作为配置中心
+
+所以通过写bootstrap.properties文件来指定地址和命名空间即可
+
+```properties
+spring.application.name=mall-gateway
+spring.cloud.nacos.config.server-addr=127.0.0.1:8848
+spring.cloud.nacos.config.namespace=f1212912-c9f6-4323-b9f5-1a7d8d92c5b4
+```
+
+配置文件如下
+
+```yml
+spring:
+    gateway:
+      routes:
+      	- id: product_route
+          uri: lb://mall-product
+          predicates:
+            - Path=/api/product/**
+          filters:
+          # 将 https://网关ip/api/product/** 这个路径重写为 https://mall-product微服务地址:端口/**
+            - RewritePath=/api/(?<segment>.*),/$\{segment}
+            
+      
+        - id: admin_route
+          uri: lb://renren-fast
+          predicates:
+            - Path=/api/**
+          filters:
+          # 将 https://网关ip/api/** 这个路径重写为 https://renren-fast微服务地址:端口/renren-fast**
+            - RewritePath=/api/(?<segment>.*),/renren-fast/$\{segment}
+```
+
+### 配置跨域
+
+```java
+@Configuration
+public class CrosConfig {
+    @Bean
+    public CorsWebFilter corsWebFilter() {
+        //此处使用响应式包
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        CorsConfiguration corsConfiguration = new CorsConfiguration();
+        //配置跨域
+        corsConfiguration.addAllowedHeader("*");
+        corsConfiguration.addAllowedMethod("*");
+        corsConfiguration.addAllowedOrigin("*");//允许哪些请求来源
+        corsConfiguration.setAllowCredentials(true);//是否允许携带cookie
+        source.registerCorsConfiguration("/**", corsConfiguration);
+        return new CorsWebFilter(source);
+    }
+}
+```
+
+**renren-fast模块删除自带的跨域配置**
+
+![image-20220731174131099](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220731174131099.png)
+
+## 测试
+
+这里配置的还有逻辑删除，在实体类上加
+
+```java
+@TableLogic(value = "1",delval = "0")
+private Integer showStatus;
+
+//配置文件补充
+mybatis-plus:
+  mapper-locations: classpath:/mapper/**/*.xml
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-value: 1
+      logic-not-delete-value: 0         
+```
+
+![image-20220731200200408](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220731200200408.png)
+
+# 品牌管理
+
+## 简单上传测试
+
+OSS是对象存储服务，有什么用呢？把图片存储到云服务器上能让所有人都访问到！
+
+详细操作可查官方文档，下面只写关键代码
+
+[[SDK示例 (aliyun.com)](https://help.aliyun.com/document_detail/32006.html)](https://help.aliyun.com/document_detail/32008.html)
+
+**一、创建子用户测试用例**
+
+官方推荐使用子账户的AccessID和SecurityID，因为如果直接给账户的AccessID和SecurityID的话，如果不小心被其他人获取到了，那账户可是有全部权限的！！！
+
+所以这里通过建立子账户，给子账户分配部分权限实习。
+
+这里通过子账户管理OSS的时候，要给子账户添加操控OSS资源的权限
+这里是必须要做的，因为子账户默认是没有任何权限的，必须手动给他赋予权限
+
+![image-20220731223234229](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220731223234229.png)
+
+**二、引入依赖**
+
+```xml
+<dependency>
+    <groupId>com.aliyun.oss</groupId>
+    <artifactId>aliyun-sdk-oss</artifactId>
+    <version>3.1.0</version>
+</dependency>
+```
+
+**三、测试用例**
+
+```java
+@SpringBootTest
+class MallProductApplicationTests {
+
+    @Test
+    public void testUploads() throws FileNotFoundException {
+        // Endpoint以华东1（杭州）为例，其它Region请按实际情况填写。
+        String endpoint = "https://oss-cn-hangzhou.aliyuncs.com";
+        // 阿里云账号AccessKey拥有所有API的访问权限，风险很高。强烈建议您创建并使用RAM用户进行API访问或日常运维，请登录RAM控制台创建RAM用户。
+        String accessKeyId = "。。。";
+        String accessKeySecret = "。。。";
+        // 填写Bucket名称，例如examplebucket。
+        String bucketName = "pyy-mall";
+        // 填写Object完整路径，完整路径中不能包含Bucket名称，例如exampledir/exampleobject.txt。
+        String objectName = "2022/testPhoto.txt";
+        // 填写本地文件的完整路径，例如D:\\localpath\\examplefile.txt。
+        // 如果未指定本地路径，则默认从示例程序所属项目对应本地路径中上传文件流。
+        String filePath= "C:\\Users\\Jack\\Desktop\\R-C.jfif";
+
+        // 创建OSSClient实例。
+        OSS ossClient = new OSSClientBuilder().build(endpoint, accessKeyId, accessKeySecret);
+
+        try {
+            InputStream inputStream = new FileInputStream(filePath);
+            // 创建PutObject请求。
+            ossClient.putObject(bucketName, objectName, inputStream);
+        } catch (OSSException oe) {
+            System.out.println("Caught an OSSException, which means your request made it to OSS, "
+                    + "but was rejected with an error response for some reason.");
+            System.out.println("Error Message:" + oe.getErrorMessage());
+            System.out.println("Error Code:" + oe.getErrorCode());
+            System.out.println("Request ID:" + oe.getRequestId());
+            System.out.println("Host ID:" + oe.getHostId());
+        } catch (ClientException ce) {
+            System.out.println("Caught an ClientException, which means the client encountered "
+                    + "a serious internal problem while trying to communicate with OSS, "
+                    + "such as not being able to access the network.");
+            System.out.println("Error Message:" + ce.getMessage());
+        } finally {
+            if (ossClient != null) {
+                ossClient.shutdown();
+            }
+        }
+    }
+
+}
+```
+
+![image-20220731223835859](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220731223835859.png)
+
+
+
+## Aliyun Spring Boot OSS
+
+https://github.com/alibaba/aliyun-spring-boot/blob/master/aliyun-spring-boot-samples/aliyun-oss-spring-boot-sample/README-zh.md
+
+**一、引入依赖**
+
+我们不是进行依赖管理了吗？为什么还要显示写出2.1.1版本
+
+这是因为这个包没有最新的包，只有和2.1.1匹配的
+
+```xml
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-alicloud-oss</artifactId>
+            <version>2.1.1.RELEASE</version>
+        </dependency>
+```
+
+**二、在配置文件中配置 OSS 服务对应的 accessKey、secretKey 和 endpoint**
+
+```properties
+    alicloud:
+      access-key: xxx
+      secret-key: xxx
+      oss:
+        endpoint: oss-cn-hangzhou.aliyuncs.com
+```
+
+**三、注入OSSClient测试**
+
+```java
+@Resource
+private OSSClient ossClient;
+
+@Test
+public void testUploads() throws FileNotFoundException {
+    // 上传文件流。
+    InputStream inputStream = new FileInputStream("C:\\Users\\Jack\\Desktop\\LeetCode_Sharing.png");
+    ossClient.putObject("pyy-mall", "2022/testPhoto2.png", inputStream);
+
+    // 关闭OSSClient。
+    ossClient.shutdown();
+    System.out.println("上传完成...");
+
+}
+```
+
+![image-20220802215310630](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220802215310630.png)
+
+## 新模块mall-third-service
+
+新模块存放所有的第三方服务，像短信服务、图片服务、视频服务等等
+
+引入依赖如下：
+
+> 这里去除了mp的依赖，因为引入mp就需要配置数据库服务器地址
+
+### 接口开发
+
+**一、配置文件**
+
+```xml
+<dependencies>
+    <dependency>
+        <groupId>com.caq.mall</groupId>
+        <artifactId>mall-common</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <exclusions>
+            <exclusion>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-boot-starter</artifactId>
+            </exclusion>
+        </exclusions>
+    </dependency>
+    <dependency>
+        <groupId>com.alibaba.cloud</groupId>
+        <artifactId>spring-cloud-alicloud-oss</artifactId>
+        <version>2.1.1.RELEASE</version>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-test</artifactId>
+        <scope>test</scope>
+        <exclusions>
+            <exclusion>
+                <groupId>org.junit.vintage</groupId>
+                <artifactId>junit-vintage-engine</artifactId>
+            </exclusion>
+        </exclusions>
+    </dependency>
+</dependencies>
+
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-dependencies</artifactId>
+            <version>${spring-cloud.version}</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-dependencies</artifactId>
+            <version>${spring-boot.version}</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+```
+
+![image-20220803164312380](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220803164312380.png)
+
+
+
+**二、启动类添加注解**
+
+> 将第三方的包也注册到注册中心
+
+- 主启动类@EnableDiscoveryClient
+
+- application.yml配置文件如下：
+
+  - ```yml
+    #用来指定注册中心地址
+    spring:
+      cloud:
+        nacos:
+          discovery:
+            server-addr: localhost:8848 #nacos地址
+        alicloud:
+          access-key: ...
+          secret-key: ...
+          oss:
+            endpoint: oss-cn-hangzhou.aliyuncs.com
+            bucket: pyy-mall
+    ```
+
+- bootstrap.yml文件指定注册中心
+
+  - ```yml
+    #用来指定配置中心地址
+    spring:
+      application:
+        name: mall-third-service
+      cloud:
+        nacos:
+          config:
+            server-addr: 127.0.0.1:8848
+            namespace: 2bbd2076-36c8-44b2-9c2e-17ce5406afb7
+            file-extension: yaml
+            extension-configs:
+              - data-id: mall-third-service.yml
+                group: DEFAULT_GROUP
+                refresh: true
+    ```
+
+**三、测试**
+
+```java
+@SpringBootTest
+class MallThirdServiceApplicationTests {
+    @Resource
+    OSSClient ossClient;
+
+    @Test
+    void contextLoads() throws FileNotFoundException {
+
+        // 上传文件流。
+        InputStream inputStream = new FileInputStream("C:\\Users\\Jack\\Desktop\\LeetCode_Sharing.png");
+        ossClient.putObject("pyy-mall", "2022/testPhoto3.png", inputStream);
+
+        // 关闭OSSClient。
+        ossClient.shutdown();
+        System.out.println("上传完成...");
+    }
+}
+```
+
+没问题！
+
+**四、改善上传**
+
+服务端签名后直传
+
+> 采用JavaScript客户端直接签名（参见JavaScript客户端签名直传）时，AccessKeyID和AcessKeySecret会暴露在前端页面，因此存在严重的安全隐患。
+>
+> 因此，OSS提供了服务端签名后直传的方案。
+
+- 向服务器获取到签名，再去请求oss服务器
+
+controller如下：
+
+> 这里定义返回类为R是为了统一返回结果，到后面也会用到
+
+```java
+package com.caq.mall.thirdservice.controller;
+
+@RestController
+@RequestMapping("oss")
+public class OssController {
+
+    @Resource
+    private OSS ossClient;
+
+    @Value("${spring.cloud.alicloud.oss.endpoint}")
+    public String endpoint;
+
+    @Value("${spring.cloud.alicloud.oss.bucket}")
+    public String bucket;
+
+    @Value("${spring.cloud.alicloud.access-key}")
+    public String accessId;
+
+    private final SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd");
+
+    @GetMapping("/policy")
+    public R getPolicy(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+        String host = "https://" + bucket + "." + endpoint; // host的格式为 bucketname.endpoint
+        // callbackUrl为上传回调服务器的URL，请将下面的IP和Port配置为您自己的真实信息。
+        //        String callbackUrl = "http://88.88.88.88:8888";
+
+
+        String dir = format.format(new Date())+"/"; // 用户上传文件时指定的前缀。以日期格式存储
+
+        // 创建OSSClient实例。
+        Map<String, String> respMap= null;
+        try {
+            long expireTime = 30;
+            long expireEndTime = System.currentTimeMillis() + expireTime * 1000;
+            Date expiration = new Date(expireEndTime);
+            // PostObject请求最大可支持的文件大小为5 GB，即CONTENT_LENGTH_RANGE为5*1024*1024*1024。
+            PolicyConditions policyConds = new PolicyConditions();
+            policyConds.addConditionItem(PolicyConditions.COND_CONTENT_LENGTH_RANGE, 0, 1048576000);
+            policyConds.addConditionItem(MatchMode.StartWith, PolicyConditions.COND_KEY, dir);
+
+            String postPolicy = ossClient.generatePostPolicy(expiration, policyConds);//生成协议秘钥
+            byte[] binaryData = postPolicy.getBytes("utf-8");
+            String encodedPolicy = BinaryUtil.toBase64String(binaryData);
+            String postSignature = ossClient.calculatePostSignature(postPolicy);
+
+            respMap = new LinkedHashMap<String, String>();
+            respMap.put("accessid", accessId);
+            respMap.put("policy", encodedPolicy);//生成的协议秘钥
+            respMap.put("signature", postSignature);
+            respMap.put("dir", dir);
+            respMap.put("host", host);
+            respMap.put("expire", String.valueOf(expireEndTime / 1000));
+            // respMap.put("expire", formatISO8601Date(expiration));
+
+
+        } catch (Exception e) {
+            // Assert.fail(e.getMessage());
+            System.out.println(e.getMessage());
+        } finally {
+            ossClient.shutdown();
+        }
+        return R.ok().put("data",respMap);
+    }
+
+}
+```
+
+测试这个请求，`http://localhost:9988/oss/policy`，成功获取
+
+![image-20220803165251881](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220803165251881.png)
+
+**五、设置网关代理**
+
+```yml
+- id: mall-third-service
+  uri: lb://mall-third-service
+  predicates:
+    - Path=/api/thirdservice/**
+  filters:
+    - RewritePath= /api/thirdservice/(?<segment>.*),/$\{segment}
+```
+
+测试这个请求，`http://localhost:88/api/thirdservice/oss/policy`
+
+![image-20220803164139979](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220803164139979.png)
+
+
+
+至此，我们的功能都没问题了，那么现在就来前端的代码
+
+### singleUpload.vue
+
+> 单文件上传组件
+
+```vue
+<template>
+  <div>
+    <el-upload
+      action="http://gulimall-hello.oss-cn-beijing.aliyuncs.com"
+      :data="dataObj"
+      list-type="picture"
+      :multiple="false" :show-file-list="showFileList"
+      :file-list="fileList"
+      :before-upload="beforeUpload"
+      :on-remove="handleRemove"
+      :on-success="handleUploadSuccess"
+      :on-preview="handlePreview">
+      <el-button size="small" type="primary">点击上传</el-button>
+      <div slot="tip" class="el-upload__tip">只能上传jpg/png文件，且不超过10MB</div>
+    </el-upload>
+    <el-dialog :visible.sync="dialogVisible">
+      <img width="100%" :src="fileList[0].url" alt="">
+    </el-dialog>
+  </div>
+</template>
+<script>
+   import {policy} from './policy'
+   import { getUUID } from '@/utils'
+
+  export default {
+    name: 'singleUpload',
+    props: {
+      value: String
+    },
+    computed: {
+      imageUrl() {
+        return this.value;
+      },
+      imageName() {
+        if (this.value != null && this.value !== '') {
+          return this.value.substr(this.value.lastIndexOf("/") + 1);
+        } else {
+          return null;
+        }
+      },
+      fileList() {
+        return [{
+          name: this.imageName,
+          url: this.imageUrl
+        }]
+      },
+      showFileList: {
+        get: function () {
+          return this.value !== null && this.value !== ''&& this.value!==undefined;
+        },
+        set: function (newValue) {
+        }
+      }
+    },
+    data() {
+      return {
+        dataObj: {
+          policy: '',
+          signature: '',
+          key: '',
+          ossaccessKeyId: '',
+          dir: '',
+          host: '',
+          // callback:'',
+        },
+        dialogVisible: false
+      };
+    },
+    methods: {
+      emitInput(val) {
+        this.$emit('input', val)
+      },
+      handleRemove(file, fileList) {
+        this.emitInput('');
+      },
+      handlePreview(file) {
+        this.dialogVisible = true;
+      },
+      beforeUpload(file) {
+        let _self = this;
+        return new Promise((resolve, reject) => {
+          policy().then(response => {
+            console.log("响应的数据",response);
+            _self.dataObj.policy = response.data.policy;
+            _self.dataObj.signature = response.data.signature;
+            _self.dataObj.ossaccessKeyId = response.data.accessid;
+            _self.dataObj.key = response.data.dir +getUUID()+'_${filename}';
+            _self.dataObj.dir = response.data.dir;
+            _self.dataObj.host = response.data.host;
+            console.log("响应的数据222。。。",_self.dataObj);
+            resolve(true)
+          }).catch(err => {
+            reject(false)
+          })
+        })
+      },
+      handleUploadSuccess(res, file) {
+        console.log("上传成功...")
+        this.showFileList = true;
+        this.fileList.pop();
+        this.fileList.push({name: file.name, url: this.dataObj.host + '/' + this.dataObj.key.replace("${filename}",file.name) });
+        this.emitInput(this.fileList[0].url);
+      }
+    }
+  }
+</script>
+<style>
+</style>
+```
+
+### multiUpload.vue
+
+> 多文件上传组件
+
+
+
+```vue
+<template>
+  <div>
+    <el-upload
+      action="http://gulimall-hello.oss-cn-beijing.aliyuncs.com"
+      :data="dataObj"
+      :list-type="listType"
+      :file-list="fileList"
+      :before-upload="beforeUpload"
+      :on-remove="handleRemove"
+      :on-success="handleUploadSuccess"
+      :on-preview="handlePreview"
+      :limit="maxCount"
+      :on-exceed="handleExceed"
+      :show-file-list="showFile"
+    >
+      <i class="el-icon-plus"></i>
+    </el-upload>
+    <el-dialog :visible.sync="dialogVisible">
+      <img width="100%" :src="dialogImageUrl" alt />
+    </el-dialog>
+  </div>
+</template>
+<script>
+import { policy } from "./policy";
+import { getUUID } from '@/utils'
+export default {
+  name: "multiUpload",
+  props: {
+    //图片属性数组
+    value: Array,
+    //最大上传图片数量
+    maxCount: {
+      type: Number,
+      default: 30
+    },
+    listType:{
+      type: String,
+      default: "picture-card"
+    },
+    showFile:{
+      type: Boolean,
+      default: true
+    }
+
+  },
+  data() {
+    return {
+      dataObj: {
+        policy: "",
+        signature: "",
+        key: "",
+        ossaccessKeyId: "",
+        dir: "",
+        host: "",
+        uuid: ""
+      },
+      dialogVisible: false,
+      dialogImageUrl: null
+    };
+  },
+  computed: {
+    fileList() {
+      let fileList = [];
+      for (let i = 0; i < this.value.length; i++) {
+        fileList.push({ url: this.value[i] });
+      }
+
+      return fileList;
+    }
+  },
+  mounted() {},
+  methods: {
+    emitInput(fileList) {
+      let value = [];
+      for (let i = 0; i < fileList.length; i++) {
+        value.push(fileList[i].url);
+      }
+      this.$emit("input", value);
+    },
+    handleRemove(file, fileList) {
+      this.emitInput(fileList);
+    },
+    handlePreview(file) {
+      this.dialogVisible = true;
+      this.dialogImageUrl = file.url;
+    },
+    beforeUpload(file) {
+      let _self = this;
+      return new Promise((resolve, reject) => {
+        policy()
+          .then(response => {
+            console.log("这是什么${filename}");
+            _self.dataObj.policy = response.data.policy;
+            _self.dataObj.signature = response.data.signature;
+            _self.dataObj.ossaccessKeyId = response.data.accessid;
+            _self.dataObj.key = response.data.dir +getUUID()+"_${filename}";
+            _self.dataObj.dir = response.data.dir;
+            _self.dataObj.host = response.data.host;
+            resolve(true);
+          })
+          .catch(err => {
+            console.log("出错了...",err)
+            reject(false);
+          });
+      });
+    },
+    handleUploadSuccess(res, file) {
+      this.fileList.push({
+        name: file.name,
+        // url: this.dataObj.host + "/" + this.dataObj.dir + "/" + file.name； 替换${filename}为真正的文件名
+        url: this.dataObj.host + "/" + this.dataObj.key.replace("${filename}",file.name)
+      });
+      this.emitInput(this.fileList);
+    },
+    handleExceed(files, fileList) {
+      this.$message({
+        message: "最多只能上传" + this.maxCount + "张图片",
+        type: "warning",
+        duration: 1000
+      });
+    }
+  }
+};
+</script>
+<style>
+</style>
+```
+
+### policy.js
+
+> 服务端签名
+
+```js
+import http from '@/utils/httpRequest.js'
+export function policy() {
+   return  new Promise((resolve,reject)=>{
+        http({
+            url: http.adornUrl("/third-party/oss/policy"),
+            method: "get",
+            params: http.adornParams({})
+        }).then(({ data }) => {
+            resolve(data);
+        })
+    });
+}
+```
+
+### 阿里云开启跨域
+
+![image-20220803200723262](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220803200723262.png)
+
+### 测试
+
+> 图片可以正常上传和显示
+
+![image-20220803200620561](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220803200620561.png)
+
+![image-20220803200535023](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220803200535023.png)
+
+## 数据校验
+
+### 前端数据校验
+
+就是规定添加的属性要符合规定，不然会出现想不到的异常！
+
+例如：添加品牌选项框中，设置检索首字母那么我们就要规定首字母不能是多个字母只能是a-z或A-Z之间的一个
+
+那么我们就可以对这个输入框进行绑定，如下
+
+![image-20220803201346675](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220803201346675.png)
+
+**实现效果如下：**
+
+![image-20220803201146001](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220803201146001.png)
+
+### JSR303数据校验
+
+后端的处理前端传来的数据时，虽然前端已做限制但是还不够严谨，例如我们可以跳过页面通过一些工具直接发送请求也可以完成添加等操作，所以后端也需要做数据校验！
+
+java中也提供了一系列的校验方式，它这些校验方式在“javax.validation.constraints”包中，@Email，@NotNull等注解。
+
+**一、添加依赖**
+
+> 后面可能其他模块也能用到，所以这里把依赖添加到common模块
+
+```xml
+<!--jsr3参数校验器-->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-validation</artifactId>
+    <version>2.3.2.RELEASE</version>
+</dependency>
+```
+
+这个依赖提供了NotNull，@NotBlank和@NotEmpty这些判断
+
+**二、给需要校验的bean添加注解**
+
+```java
+/**
+ * 品牌
+ * 
+ * @author xiaocai
+ * @email mildcaq@gmail.com
+ * @date 2022-07-27 21:05:30
+ */
+@Data
+@TableName("pms_brand")
+public class BrandEntity implements Serializable {
+   private static final long serialVersionUID = 1L;
+
+   /**
+    * 品牌id
+    */
+   @TableId
+   private Long brandId;
+   /**
+    * 品牌名
+    */
+   @NotBlank
+   private String name;
+   /**
+    * 品牌logo地址
+    */
+   private String logo;
+   /**
+    * 介绍
+    */
+   private String descript;
+   /**
+    * 显示状态[0-不显示；1-显示]
+    */
+   @NotNull
+   private Integer showStatus;
+   /**
+    * 检索首字母
+    */
+   @NotEmpty
+   private String firstLetter;
+   /**
+    * 排序
+    */
+   @NotNull
+   @Min(0)
+   private Integer sort;
+
+}
+```
+
+未在控制类中指定方法开启校验时如下：
+
+![image-20220805214722499](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220805214722499.png)
+
+controller中给请求方法加校验注解`@Valid`，开启校验，
+
+```java
+/**
+ * 保存
+ */
+@RequestMapping("/save")
+public R save(@RequestBody @Valid BrandEntity brand){
+    brandService.save(brand);
+    return R.ok();
+}
+```
+
+> 这里我错误信息只返回是Bad Request
+>
+> 视频中老师所讲的是有详细信息的，这个差异应该是版本原因不影响！
+
+![image-20220805214850184](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220805214850184.png)
+
+这种返回的错误结果并不符合我们的业务需要。我们想让捕捉这个错误的详细信息，并且能够统一返回我们自定义的信息！
+
+**三、通过BindResult捕获校验结果**
+
+修改内容如下：
+
+```java
+@RequestMapping("/save")
+public R save(@Valid @RequestBody BrandEntity brand,BindingResult result){
+    if( result.hasErrors()){
+        Map<String,String> map=new HashMap<>();
+        //1.获取错误的校验结果
+        result.getFieldErrors().forEach((item)->{
+            //获取发生错误时的message
+            String message = item.getDefaultMessage();
+            //获取发生错误的字段
+            String field = item.getField();
+            map.put(field,message);
+        });
+        return R.error(400,"提交的数据不合法").put("data",map);
+    }else {
+
+    }
+    brandService.save(brand);
+
+    return R.ok();
+}
+```
+
+**再次测试**
+
+好啦，这下把错误信息都捕获到喽！
+
+![image-20220805215355999](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220805215355999.png)
+
+但是，这种是针对于该请求设置了一个内容校验，如果针对于每个请求都单独进行配置，显然不是太合适，实际上可以`统一的对于异常进行处理`。
+
+**四、统一异常处理**
+
+可以使用SpringMvc所提供的@ControllerAdvice，通过“basePackages”能够说明处理哪些路径下的异常。
+
+**（1）抽取一个异常处理类**
+
+> 详细信息都写在了注释里，可以作为参考！！！
+
+```java
+@Slf4j
+@RestControllerAdvice(basePackages = "com.caq.mall.product.controller")
+public class MallExceptionAdvice {
+    //指定的包下所有的校验异常都会被这个方法捕捉
+    @ExceptionHandler(value = MethodArgumentNotValidException.class)
+    public R handleValidException(MethodArgumentNotValidException exception) {
+        //定义map，存放所有错误信息
+        Map<String, String> map = new HashMap<>();
+        //通过BindResult捕获校验结果
+        BindingResult bindingResult = exception.getBindingResult();
+        //遍历校验结果中所有字段的错误，字段为key，错误信息为value存放到map中
+        bindingResult.getFieldErrors().forEach(fieldError -> {
+            String message = fieldError.getDefaultMessage();
+            String field = fieldError.getField();
+            map.put(field, message);
+        });
+//        控制台打印错误信息
+        log.error("数据校验出现问题{},异常类型{}", exception.getMessage(), exception.getClass());
+//        返回错误结果，并显示所有错误的数据
+        return R.error(400, "数据校验出现问题").put("data", map);
+    }
+}
+```
+
+**（2）测试： http://localhost:88/api/product/brand/save** 
+
+> 接下来我们去掉我们控制类中save方法的校验，看看统一异常处理能否生效
+
+还是可以哦！
+
+![image-20220805221126581](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220805221126581.png)
+
+**（3）错误状态码**
+
+正规开发过程中，错误状态码有着严格的定义规则
+
+```java
+/***
+ * 错误码和错误信息定义类
+ * 1. 错误码定义规则为5为数字
+ * 2. 前两位表示业务场景，最后三位表示错误码。例如：100001。10:通用 001:系统未知异常
+ * 3. 维护错误码后需要维护错误描述，将他们定义为枚举形式
+ * 错误码列表：
+ *  10: 通用
+ *      001：参数格式校验
+ *  11: 商品
+ *  12: 订单
+ *  13: 购物车
+ *  14: 物流
+ */
+public enum BizCodeEnum {
+
+    UNKNOW_EXEPTION(10000,"系统未知异常"),
+
+    VALID_EXCEPTION( 10001,"参数格式校验失败");
+
+    private int code;
+    private String msg;
+
+    BizCodeEnum(int code, String msg) {
+        this.code = code;
+        this.msg = msg;
+    }
+
+    public int getCode() {
+        return code;
+    }
+
+    public String getMsg() {
+        return msg;
+    }
+}
+```
+
+**（4）默认异常处理**
+
+上面的统一异常处理只是针对了校验相关的错误，那么如果是其他异常呢？
+
+那就再来个默认的异常处理呗
+
+```java
+   @ExceptionHandler(value = Throwable.class)
+    public R handleException(Throwable throwable){
+        log.error("未知异常{},异常类型{}",throwable.getMessage(),throwable.getClass());
+        return R.error(BizCodeEnum.UNKNOW_EXEPTION.getCode(),BizCodeEnum.UNKNOW_EXEPTION.getMsg());
+    }
+```
+
+### 分组校验功能
+
+**一、给校验注解，标注上groups，指定什么情况下才需要进行校验**
+
+如：指定在更新和添加的时候，都需要进行校验，我们对id进行限制
+
+```java
+	/**
+	 * 品牌id
+	 */
+	@NotNull(message = "修改必须指定品牌id",groups = {UpdateGroup.class})
+	@Null(message = "新增不能指定id",groups = {AddGroup.class})
+	@TableId
+	private Long brandId;
+```
+
+这里的UpdateGroup和AddGroup都需要收到创建一下，为了演示可以只创建不写内容
+
+**二、使用@Validated注解**
+
+> @Validated(AddGroup.class)指定新增的时候注解才会生效
+>
+> 其他的注解字段，即使标注校检也不生效
+
+```java
+/**
+ * 保存
+ */
+@RequestMapping("/save")
+public R save(@Validated(AddGroup.class) @RequestBody BrandEntity brand){
+    brandService.save(brand);
+    return R.ok();
+}
+```
+
+**三、测试**
+
+因为指定了新增不能指定id，但是我们测试的时候加id了所以返回错误信息
+
+![image-20220805230241988](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220805230241988.png)
+
+测试其他字段
+
+可以看到即使name字段加非空了，我们测试用空值也是可以生效的
+
+说明在**分组校验情况下，没有指定指定分组的校验注解，将不会生效，它只会在不分组的情况下生效。**
+
+![image-20220805230445826](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220805230445826.png)
+
+### 自定义校验功能
+
+**一、导入依赖**
+
+```xml
+<dependency>
+    <groupId>javax.validation</groupId>
+    <artifactId>validation-api</artifactId>
+    <version>2.0.1.Final</version>
+</dependency>
+```
+
+**二、编写自定义注解**
+
+**（1）注解的格式不会写怎么办？**
+
+直接复制其他注解的形式
+
+**（2）特别说明**
+
+- @Target的意思是说，这个注解能标注在哪里，后面通过{}进行指定
+- String message() default "{com.caq.common.valid.ListValue.message}";这个意思是指，@ListValue注解的错误提示信息会去配置文件中找这个message的值当作信息
+- int[] vals() default {};这里的定义是值@ListValue这个注解可以有变量名为vals的int数组做为参数
+
+**（3）@Constraint( validatedBy = {})的说明**
+
+validatedBy指定这个注解由哪一个校验器校验，详细信息如图：
+
+![image-20220805233440319](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220805233440319.png)
+
+**（4）配置注解错误返回信息**
+
+在resource文件下创建：ValidationMessages.properties
+
+```properties
+com.zsy.common.valid.ListValue.message=必须提交指定的值
+```
+
+**（5）自定义的校验器**
+
+详细信息还是注意代码中的注释
+
+```java
+public class ListValueConstraintValidator implements ConstraintValidator<ListValue, Integer> {
+    private final Set<Integer> set = new HashSet<>();
+
+    /**
+     * 初始化方法
+     * 参数：自定义注解的详细信息
+     */
+    @Override
+    public void initialize(ListValue constraintAnnotation) {
+        //constraintAnnotation.vals()意思是获得你注解里的参数
+        int[] values = constraintAnnotation.vals();
+        //把获取到的参数放到set集合里
+        for (int v al : values) {
+            set.add(val);
+        }
+    }
+
+    /**
+     * 判断是否校验成功
+     * @param value   需要校验的值
+     */
+    @Override
+    public boolean isValid(Integer value, ConstraintValidatorContext context) {
+        //这里的Integer value参数是指你注解里提交过来的参数
+        //之后判断集合里是否有这个传进来的值，如果有返回true，没的话返回false并返回错误信息
+        return set.contains(value);
+    }
+}
+```
+
+**（6）关联自定义校验器**
+
+通过validatedBy = {ListValueConstraintValidator.class}去指定即可！
+
+那如果以后@ListValue注解支持的属性类型变为double了，我们只需要在指定新的校验器即可
+
+```java
+/**
+ * 自定义校验注解 声明可以取那些值
+ */
+@Documented
+@Constraint(validatedBy = {ListValueConstraintValidator.class})
+@Target({ METHOD, FIELD, ANNOTATION_TYPE, CONSTRUCTOR, PARAMETER, TYPE_USE })
+@Retention(RUNTIME)
+public @interface ListValue {
+    String message() default "{com.caq.common.validation.ListValue.message}";
+
+    Class<?>[] groups() default {};
+
+    Class<? extends Payload>[] payload() default {};
+
+    int[] vals() default {};
+}
+
+```
+
+**三、测试**
+
+我们给状态字段指定分组检验，让它增加的时候才进行校验
+
+```java
+    /**
+     * 显示状态[0-不显示；1-显示]
+     */
+    @ListValue(vals = {0, 1}, groups = {AddGroup.class})
+    private Integer showStatus;
+```
+
+**（1）读取properties文件内容乱码**
+
+![image-20220806001349906](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220806001349906.png)
+
+设置好，清理target，重新编译
+
+再次测试
+
+![image-20220806001259826](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220806001259826.png)
+
+
+
+### 完善代码
+
+**（1）做检验的字段**
+
+```java
+/**
+ * 品牌
+ * @author xiaocai
+ * @email mildcaq@gmail.com
+ * @date 2022-07-27 21:05:30
+ */
+@Data
+@TableName("pms_brand")
+public class BrandEntity implements Serializable {
+    private static final long serialVersionUID = 1L;
+
+    /**
+     * 品牌id
+     */
+    @NotNull(message = "修改必须指定品牌id", groups = {UpdateGroup.class})
+    @Null(message = "新增不能指定id", groups = {AddGroup.class})
+    @TableId
+    private Long brandId;
+    /**
+     * 品牌名
+     */
+    @NotBlank(message = "品牌名必须提交", groups = {AddGroup.class, UpdateGroup.class})
+    private String name;
+    /**
+     * 品牌logo地址
+     */
+    @NotBlank(groups = {AddGroup.class})
+    @URL(message = "logo必须是一个合法的url地址", groups = {AddGroup.class, UpdateGroup.class})
+    private String logo;
+    /**
+     * 介绍
+     */
+    private String descript;
+    /**
+     * 显示状态[0-不显示；1-显示]
+     */
+// @Pattern()
+    @NotNull(groups = {AddGroup.class, UpdateStatusGroup.class})
+    @ListValue(vals = {0, 1}, groups = {AddGroup.class, UpdateStatusGroup.class})
+    private Integer showStatus;
+    /**
+     * 检索首字母
+     */
+    @NotEmpty(groups = {AddGroup.class})
+    @Pattern(regexp = "^[a-zA-Z]$", message = "检索首字母必须是一个字母", groups = {AddGroup.class, UpdateGroup.class})
+    private String firstLetter;
+    /**
+     * 排序
+     */
+    @NotNull(groups = {AddGroup.class})
+    @Min(value = 0, message = "排序必须大于等于0", groups = {AddGroup.class, UpdateGroup.class})
+    private Integer sort;
+}
+```
+
+**（2）controller中共三个方法做了数据校验**
+
+```java
+/**
+   * 保存
+   */
+  @RequestMapping("/save")
+  public R save(@Validated(AddGroup.class) @RequestBody BrandEntity brand){
+      brandService.save(brand);
+      return R.ok();
+  }
+
+  /**
+   * 修改
+   */
+  @RequestMapping("/update")
+  public R update(@Validated({UpdateGroup.class})@RequestBody BrandEntity brand){
+brandService.updateById(brand);
+      return R.ok();
+  }
+
+  @RequestMapping("/update/status")
+  public R updateStatus(@Validated({UpdateStatusGroup.class}) @RequestBody BrandEntity brand){
+      brandService.updateById(brand);
+      return R.ok();
+  }
+```
+
+
+
+**（三）测试前后端的校验**
+
+测试状态修改
+
+![image-20220806002244394](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220806002244394.png)
+
+测试修改
+
+![image-20220806002715222](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220806002715222.png)
+
+测试新增
+
+![image-20220806003002793](https://typora-1259403628.cos.ap-nanjing.myqcloud.com/image-20220806003002793.png)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
